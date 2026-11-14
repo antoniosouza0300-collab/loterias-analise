@@ -1,0 +1,47 @@
+# Análise Estatística da Lotofácil
+
+Projeto em Python para organizar resultados históricos da Lotofácil, calcular estatísticas descritivas e avaliar combinações de jogos com critérios configuráveis.
+
+## Objetivos
+
+- Organizar resultados históricos em CSV.
+- Calcular frequência dos números de 1 a 25.
+- Identificar números mais e menos frequentes no histórico.
+- Avaliar jogos com critérios estatísticos.
+- Aplicar filtros configuráveis para aprovação ou reprovação de combinações.
+- Gerar relatórios de análise.
+
+## Critérios de avaliação
+
+O projeto considera critérios como:
+
+- Soma dos números.
+- Quantidade de pares e ímpares.
+- Números primos.
+- Moldura e miolo.
+- Repetições em relação ao concurso anterior.
+- Múltiplos de 3.
+- Fibonacci.
+- Linhas, colunas e quadrantes.
+- Diagonais, cruz e extremos.
+
+Os critérios serão documentados e implementados com definições matemáticas explícitas.
+
+## Tecnologias
+
+- Python
+- Pandas
+- NumPy
+- CSV
+- Excel
+
+## Estrutura planejada
+
+```text
+loterias-analise/
+├── data/
+├── src/
+├── tests/
+├── reports/
+├── README.md
+└── requirements.txt
