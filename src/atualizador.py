@@ -1,37 +1,38 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import tempfile
-import unicodedata
-from io import BytesIO
+import time
+import urllib.error
+import urllib.request
+
+from datetime import datetime
 from pathlib import Path
-from urllib.request import Request, urlopen
-
-import pandas as pd
-
-try:
-    from .importador import importar_resultados, validar_resultados
-except ImportError:
-    from importador import importar_resultados, validar_resultados
+from typing import Any
 
 
 # ============================================================
 # CONFIGURAÇÕES
 # ============================================================
 
-URL_API = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
-
-URL_HISTORICO = (
-    "https://servicebus2.caixa.gov.br/portaldeloterias/api/"
-    "resultados/download?modalidade=Lotof%C3%A1cil"
+URL_API = (
+    "https://servicebus2.caixa.gov.br/"
+    "portaldeloterias/api/lotofacil"
 )
 
 TOTAL_CONCURSOS = 100
+TIMEOUT = 45
+MAX_TENTATIVAS = 5
+INTERVALO_REQUISICOES = 1.0
 
-PASTA_PROJETO = Path(__file__).resolve().parents[1]
-ARQUIVO_CSV = PASTA_PROJETO / "data" / "lotofacil.csv"
+ARQUIVO_CSV = (
+    Path(__file__).resolve().parents[1]
+    / "data"
+    / "lotofacil.csv"
+)
 
 COLUNAS = [
     "concurso",
@@ -39,418 +40,479 @@ COLUNAS = [
     *[f"bola{i}" for i in range(1, 16)],
 ]
 
+_ultima_requisicao = 0.0
+
 
 # ============================================================
-# COMUNICAÇÃO COM A CAIXA
+# COMUNICAÇÃO COM A API
 # ============================================================
 
-def requisitar(url: str, timeout: int = 45) -> bytes:
-    """Realiza uma requisição HTTP."""
-    requisicao = Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 loterias-analise/1.0",
-            "Accept": "application/json, application/octet-stream, */*",
-        },
-    )
+def aguardar_intervalo() -> None:
+    """Controla o intervalo entre requisições."""
 
-    try:
-        with urlopen(requisicao, timeout=timeout) as resposta:
-            return resposta.read()
-    except Exception as erro:
-        raise RuntimeError(
-            f"Erro ao consultar a CAIXA: {erro}"
-        ) from erro
+    global _ultima_requisicao
+
+    agora = time.monotonic()
+    decorrido = agora - _ultima_requisicao
+
+    if decorrido < INTERVALO_REQUISICOES:
+        time.sleep(INTERVALO_REQUISICOES - decorrido)
+
+    _ultima_requisicao = time.monotonic()
+
+
+def requisitar_json(url: str) -> dict[str, Any]:
+    """Consulta a API com timeout e novas tentativas."""
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; LotofacilAnalise/1.0)",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    for tentativa in range(MAX_TENTATIVAS):
+        aguardar_intervalo()
+
+        requisicao = urllib.request.Request(
+            url,
+            headers=headers,
+            method="GET",
+        )
+
+        try:
+            with urllib.request.urlopen(
+                requisicao,
+                timeout=TIMEOUT,
+            ) as resposta:
+                conteudo = resposta.read().decode("utf-8")
+                dados = json.loads(conteudo)
+
+                if not isinstance(dados, dict):
+                    raise RuntimeError(
+                        f"Resposta inesperada da API: {url}"
+                    )
+
+                return dados
+
+        except urllib.error.HTTPError as erro:
+            codigo = erro.code
+
+            if codigo not in (429, 500, 502, 503, 504):
+                raise RuntimeError(
+                    f"Erro HTTP {codigo} ao consultar a CAIXA: {url}"
+                ) from erro
+
+            retry_after = erro.headers.get("Retry-After")
+
+            try:
+                espera = float(retry_after)
+            except (TypeError, ValueError):
+                espera = 2 ** tentativa
+
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            json.JSONDecodeError,
+        ) as erro:
+            espera = 2 ** tentativa
+
+        if tentativa == MAX_TENTATIVAS - 1:
+            raise RuntimeError(
+                f"Falha após {MAX_TENTATIVAS} tentativas: {url}"
+            ) from erro
+
+        time.sleep(min(espera, 60))
+
+    raise RuntimeError("Não foi possível consultar a API.")
 
 
 def consultar_concurso(numero: int | None = None) -> dict:
     """Consulta o último concurso ou um concurso específico."""
-    url = URL_API
 
-    if numero is not None:
+    if numero is None:
+        url = URL_API
+    else:
+        if numero < 1:
+            raise ValueError("Número de concurso inválido.")
+
         url = f"{URL_API}/{numero}"
 
-    try:
-        conteudo = requisitar(url)
-        resultado = json.loads(conteudo.decode("utf-8"))
-    except Exception as erro:
-        raise RuntimeError(
-            f"Falha ao consultar o concurso {numero or 'mais recente'}: "
-            f"{erro}"
-        ) from erro
-
-    if not isinstance(resultado, dict):
-        raise ValueError("Resposta inválida da API da CAIXA.")
-
-    return resultado
+    return requisitar_json(url)
 
 
 # ============================================================
-# CONVERSÃO DOS RESULTADOS
+# NORMALIZAÇÃO E VALIDAÇÃO
 # ============================================================
 
-def normalizar_nome_coluna(nome: str) -> str:
-    """Normaliza nomes de colunas do Excel."""
-    texto = unicodedata.normalize("NFKD", str(nome))
+def converter_data(valor: str) -> str:
+    """Converte datas para o padrão ISO YYYY-MM-DD."""
 
-    texto = "".join(
-        caractere
-        for caractere in texto
-        if not unicodedata.combining(caractere)
+    valor = str(valor).strip()
+
+    formatos = (
+        "%d/%m/%Y",
+        "%Y-%m-%d",
     )
 
-    return (
-        texto.lower()
-        .strip()
-        .replace(" ", "")
-        .replace("_", "")
-    )
+    for formato in formatos:
+        try:
+            return datetime.strptime(
+                valor,
+                formato,
+            ).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    raise ValueError(f"Data inválida: {valor}")
 
 
-def converter_historico_excel(conteudo: bytes) -> pd.DataFrame:
-    """Lê o histórico oficial e converte para o formato do projeto."""
+def converter_resultado_api(dados: dict) -> dict:
+    """Converte a resposta da CAIXA para o formato do CSV."""
+
     try:
-        original = pd.read_excel(
-            BytesIO(conteudo),
-            engine="openpyxl",
-        )
-    except Exception as erro:
-        raise ValueError(
-            f"Não foi possível ler o Excel oficial: {erro}"
-        ) from erro
+        concurso = int(dados["numero"])
+        data = converter_data(dados["dataApuracao"])
 
-    mapa = {
-        normalizar_nome_coluna(coluna): coluna
-        for coluna in original.columns
-    }
-
-    aliases = {
-        "concurso": ["concurso"],
-        "data": ["datasorteio", "dataapuracao", "data"],
-    }
-
-    conversoes = {}
-
-    for destino, opcoes in aliases.items():
-        origem = next(
-            (mapa[opcao] for opcao in opcoes if opcao in mapa),
-            None,
-        )
-
-        if origem is None:
-            raise ValueError(
-                f"Coluna '{destino}' não encontrada no histórico."
-            )
-
-        conversoes[origem] = destino
-
-    for numero in range(1, 16):
-        destino = f"bola{numero}"
-
-        opcoes = [
-            destino,
-            f"bola{numero:02d}",
+        dezenas = [
+            int(dezena)
+            for dezena in dados["listaDezenas"]
         ]
-
-        origem = next(
-            (mapa[opcao] for opcao in opcoes if opcao in mapa),
-            None,
-        )
-
-        if origem is None:
-            raise ValueError(
-                f"Coluna da dezena {numero} não encontrada."
-            )
-
-        conversoes[origem] = destino
-
-    dados = original.rename(columns=conversoes)
-
-    return dados[COLUNAS].copy()
-
-
-def converter_resultado_api(resultado: dict) -> dict:
-    """Converte a resposta JSON de um concurso."""
-    try:
-        numero = int(resultado["numero"])
-        data = resultado["dataApuracao"]
-        dezenas = resultado["listaDezenas"]
-
-        if not isinstance(dezenas, list):
-            raise ValueError("Lista de dezenas inválida.")
-
-        if len(dezenas) != 15:
-            raise ValueError("O concurso não contém 15 dezenas.")
-
-        registro = {
-            "concurso": numero,
-            "data": data,
-        }
-
-        for indice, dezena in enumerate(dezenas, start=1):
-            registro[f"bola{indice}"] = int(dezena)
-
-        return registro
 
     except (KeyError, TypeError, ValueError) as erro:
         raise ValueError(
-            f"Resultado inválido recebido da CAIXA: {erro}"
+            f"Formato inesperado no resultado da CAIXA: {erro}"
         ) from erro
 
+    if concurso < 1:
+        raise ValueError("Número de concurso inválido.")
 
-# ============================================================
-# VALIDAÇÃO E ORGANIZAÇÃO
-# ============================================================
-
-def verificar_sequencia(dados: pd.DataFrame) -> None:
-    """Confere se os concursos são consecutivos."""
-    concursos = dados["concurso"].astype(int).tolist()
-
-    if not concursos:
-        raise ValueError("Histórico vazio.")
-
-    esperados = list(
-        range(concursos[0], concursos[-1] + 1)
-    )
-
-    if concursos != esperados:
+    if len(dezenas) != 15:
         raise ValueError(
-            "Foram encontrados concursos ausentes ou fora de ordem."
+            f"Concurso {concurso}: esperado 15 dezenas."
         )
 
-
-def preparar_ultimos_100(dados: pd.DataFrame) -> pd.DataFrame:
-    """Valida e mantém somente os 100 concursos mais recentes."""
-    dados = validar_resultados(dados)
-
-    dados = dados.sort_values("concurso")
-    dados = dados.drop_duplicates(
-        subset=["concurso"],
-        keep="last",
-    )
-
-    dados = dados.tail(TOTAL_CONCURSOS).reset_index(drop=True)
-
-    if len(dados) != TOTAL_CONCURSOS:
+    if len(set(dezenas)) != 15:
         raise ValueError(
-            f"Histórico incompleto: encontrados {len(dados)} "
-            f"concursos, esperados {TOTAL_CONCURSOS}."
+            f"Concurso {concurso}: existem dezenas repetidas."
         )
 
-    verificar_sequencia(dados)
+    if any(dezena < 1 or dezena > 25 for dezena in dezenas):
+        raise ValueError(
+            f"Concurso {concurso}: dezena fora do intervalo 1–25."
+        )
 
-    return dados[COLUNAS]
+    registro = {
+        "concurso": concurso,
+        "data": data,
+    }
+
+    for indice, dezena in enumerate(sorted(dezenas), start=1):
+        registro[f"bola{indice}"] = dezena
+
+    return registro
+
+
+def validar_registro(registro: dict) -> dict:
+    """Valida e normaliza um registro."""
+
+    try:
+        concurso = int(registro["concurso"])
+        data = converter_data(registro["data"])
+
+        dezenas = [
+            int(registro[f"bola{i}"])
+            for i in range(1, 16)
+        ]
+
+    except (KeyError, TypeError, ValueError) as erro:
+        raise ValueError(
+            f"Registro inválido: {erro}"
+        ) from erro
+
+    if concurso < 1:
+        raise ValueError("Número de concurso inválido.")
+
+    if len(set(dezenas)) != 15:
+        raise ValueError(
+            f"Concurso {concurso}: dezenas repetidas."
+        )
+
+    if any(dezena < 1 or dezena > 25 for dezena in dezenas):
+        raise ValueError(
+            f"Concurso {concurso}: dezenas fora do intervalo."
+        )
+
+    registro_validado = {
+        "concurso": concurso,
+        "data": data,
+    }
+
+    for indice, dezena in enumerate(sorted(dezenas), start=1):
+        registro_validado[f"bola{indice}"] = dezena
+
+    return registro_validado
+
+
+def validar_historico(registros: list[dict]) -> list[dict]:
+    """Verifica duplicidades e sequência dos concursos."""
+
+    normalizados = [
+        validar_registro(registro)
+        for registro in registros
+    ]
+
+    normalizados.sort(key=lambda item: item["concurso"])
+
+    numeros = [
+        registro["concurso"]
+        for registro in normalizados
+    ]
+
+    if len(numeros) != len(set(numeros)):
+        raise ValueError("O histórico contém concursos duplicados.")
+
+    for anterior, atual in zip(numeros, numeros[1:]):
+        if atual != anterior + 1:
+            raise ValueError(
+                f"Sequência interrompida entre "
+                f"os concursos {anterior} e {atual}."
+            )
+
+    return normalizados
+
+
+# ============================================================
+# LEITURA DO CSV
+# ============================================================
+
+def ler_historico() -> list[dict]:
+    """Lê o CSV existente. Não altera o arquivo original."""
+
+    if not ARQUIVO_CSV.exists():
+        return []
+
+    registros = []
+
+    with ARQUIVO_CSV.open(
+        "r",
+        encoding="utf-8-sig",
+        newline="",
+    ) as arquivo:
+
+        leitor = csv.DictReader(arquivo)
+
+        if not leitor.fieldnames:
+            raise ValueError("O CSV existente está vazio ou inválido.")
+
+        nomes = {
+            nome.strip().lower()
+            for nome in leitor.fieldnames
+        }
+
+        obrigatorias = set(COLUNAS)
+
+        if not obrigatorias.issubset(nomes):
+            raise ValueError(
+                "O CSV existente não possui todas as colunas obrigatórias."
+            )
+
+        for linha in leitor:
+            linha_normalizada = {
+                str(chave).strip().lower(): valor
+                for chave, valor in linha.items()
+                if chave is not None
+            }
+
+            registros.append(
+                validar_registro(linha_normalizada)
+            )
+
+    return validar_historico(registros)
 
 
 # ============================================================
 # GRAVAÇÃO ATÔMICA
 # ============================================================
 
-def gravar_atomicamente(
-    dados: pd.DataFrame,
-    destino: Path,
-) -> None:
+def gravar_atomicamente(registros: list[dict]) -> None:
     """
-    Grava em arquivo temporário e substitui o CSV somente
-    depois que a gravação for concluída.
+    Grava em arquivo temporário e substitui o CSV
+    somente depois que a gravação termina corretamente.
     """
-    destino.parent.mkdir(
+
+    ARQUIVO_CSV.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    temporario = None
+    arquivo_temporario = None
 
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
-            encoding="utf-8-sig",
+            encoding="utf-8",
             newline="",
+            dir=ARQUIVO_CSV.parent,
             suffix=".tmp",
             prefix="lotofacil_",
-            dir=destino.parent,
             delete=False,
-        ) as arquivo:
+        ) as temporario:
 
-            temporario = Path(arquivo.name)
+            arquivo_temporario = Path(temporario.name)
 
-            dados.to_csv(
-                arquivo,
-                index=False,
-                columns=COLUNAS,
+            escritor = csv.DictWriter(
+                temporario,
+                fieldnames=COLUNAS,
+                delimiter=",",
             )
 
-            arquivo.flush()
-            os.fsync(arquivo.fileno())
+            escritor.writeheader()
 
-        # Substituição atômica.
-        os.replace(temporario, destino)
+            for registro in registros:
+                escritor.writerow(registro)
+
+            temporario.flush()
+            os.fsync(temporario.fileno())
+
+        os.replace(
+            arquivo_temporario,
+            ARQUIVO_CSV,
+        )
 
     finally:
-        if temporario and temporario.exists():
-            temporario.unlink()
+        if (
+            arquivo_temporario is not None
+            and arquivo_temporario.exists()
+        ):
+            arquivo_temporario.unlink()
 
 
 # ============================================================
-# ATUALIZAÇÃO DO HISTÓRICO
+# ATUALIZAÇÃO DOS ÚLTIMOS 100 CONCURSOS
 # ============================================================
 
-def atualizar_historico(
-    caminho: str | Path = ARQUIVO_CSV,
-) -> dict:
+def atualizar_historico() -> dict:
+    """
+    Atualiza o histórico mantendo somente os últimos 100 concursos.
 
-    destino = Path(caminho)
+    Primeira execução:
+        Consulta individualmente os 100 concursos.
 
-    # Consulta o concurso mais recente.
-    ultimo_resultado = consultar_concurso()
+    Execuções seguintes:
+        Consulta os concursos ausentes e o concurso mais recente,
+        permitindo detectar correções no resultado mais atual.
 
-    numero_atual = int(ultimo_resultado["numero"])
+    A operação é idempotente: executar novamente sem alterações
+    não duplica registros nem regrava o CSV desnecessariamente.
+    """
 
-    # --------------------------------------------------------
-    # PRIMEIRA EXECUÇÃO
-    # --------------------------------------------------------
+    print("Consultando o concurso mais recente da CAIXA...")
 
-    if not destino.exists():
+    dados_atual = consultar_concurso()
+    registro_atual = converter_resultado_api(dados_atual)
 
-        print("Primeira execução: baixando histórico oficial...")
+    numero_atual = registro_atual["concurso"]
+    primeiro_concurso = max(1, numero_atual - TOTAL_CONCURSOS + 1)
 
-        conteudo = requisitar(URL_HISTORICO)
+    anterior = ler_historico()
 
-        historico = converter_historico_excel(conteudo)
+    mapa_anterior = {
+        registro["concurso"]: registro
+        for registro in anterior
+    }
 
-        historico = validar_resultados(historico)
+    if anterior:
+        ultimo_local = max(mapa_anterior)
 
-        historico = historico.sort_values("concurso")
-
-        # Mantém somente os últimos 100.
-        historico = historico.tail(TOTAL_CONCURSOS)
-
-        # Confere o concurso mais recente.
-        if int(historico["concurso"].max()) != numero_atual:
+        if ultimo_local > numero_atual:
             raise ValueError(
-                "O histórico baixado não corresponde "
-                "ao último concurso da CAIXA."
+                "O CSV contém concurso posterior ao informado pela CAIXA."
             )
 
-        historico = preparar_ultimos_100(historico)
+    else:
+        ultimo_local = 0
 
-        gravar_atomicamente(historico, destino)
+    mapa_novo = {
+        numero: registro
+        for numero, registro in mapa_anterior.items()
+        if primeiro_concurso <= numero <= numero_atual
+    }
 
-        return {
-            "status": "carga_inicial",
-            "total_concursos": len(historico),
-            "primeiro_concurso": int(historico["concurso"].min()),
-            "ultimo_concurso": numero_atual,
-            "novos_concursos": len(historico),
-            "arquivo": str(destino),
-        }
+    novos_concursos = 0
+    consultas = 0
 
-    # --------------------------------------------------------
-    # ATUALIZAÇÕES SEGUINTES
-    # --------------------------------------------------------
+    total_necessario = numero_atual - primeiro_concurso + 1
 
-    anterior = importar_resultados(destino)
+    print(
+        f"Atualizando a janela de concursos "
+        f"{primeiro_concurso} a {numero_atual}..."
+    )
 
-    anterior = anterior.sort_values("concurso")
+    for numero in range(primeiro_concurso, numero_atual + 1):
 
-    if len(anterior) > TOTAL_CONCURSOS:
-        raise ValueError(
-            "O CSV local possui mais de 100 concursos. "
-            "Revise o arquivo antes de atualizar."
-        )
+        # Consulta concursos ausentes e sempre reconsulta o mais recente.
+        if numero not in mapa_novo or numero == numero_atual:
 
-    ultimo_local = int(anterior["concurso"].max())
+            if numero == numero_atual:
+                dados = dados_atual
+            else:
+                dados = consultar_concurso(numero)
 
-    if ultimo_local > numero_atual:
-        raise ValueError(
-            "O CSV local possui concurso posterior ao informado pela CAIXA."
-        )
+            registro = converter_resultado_api(dados)
 
-    # Atualiza também o último concurso local, permitindo
-    # detectar eventual correção publicada pela CAIXA.
-    inicio = int(anterior["concurso"].min())
+            if registro["concurso"] != numero:
+                raise ValueError(
+                    f"A API retornou o concurso "
+                    f"{registro['concurso']} ao solicitar {numero}."
+                )
 
-    novos_registros = []
+            if numero not in mapa_anterior:
+                novos_concursos += 1
 
-    for numero in range(ultimo_local, numero_atual + 1):
+            mapa_novo[numero] = registro
+            consultas += 1
 
-        resultado = (
-            ultimo_resultado
-            if numero == numero_atual
-            else consultar_concurso(numero)
-        )
-
-        registro = converter_resultado_api(resultado)
-
-        if registro["concurso"] != numero:
-            raise ValueError(
-                f"Concurso inesperado: solicitado {numero}, "
-                f"recebido {registro['concurso']}."
+        if consultas and consultas % 10 == 0:
+            print(
+                f"Consultas individuais concluídas: {consultas}"
             )
 
-        novos_registros.append(registro)
-
-    novos = pd.DataFrame(novos_registros)
-
-    # Remove do histórico local os concursos que serão
-    # atualizados pela resposta oficial.
-    anterior = anterior[
-        anterior["concurso"] < ultimo_local
-    ]
-
-    combinado = pd.concat(
-        [anterior, novos],
-        ignore_index=True,
+    resultado = sorted(
+        mapa_novo.values(),
+        key=lambda item: item["concurso"],
     )
 
-    combinado = combinado.drop_duplicates(
-        subset=["concurso"],
-        keep="last",
-    )
+    resultado = validar_historico(resultado)
 
-    combinado = combinado.sort_values("concurso")
-
-    # Mantém somente os 100 mais recentes.
-    combinado = combinado.tail(TOTAL_CONCURSOS)
-
-    # Validação completa antes de qualquer gravação.
-    combinado = preparar_ultimos_100(combinado)
-
-    if int(combinado["concurso"].max()) != numero_atual:
+    if len(resultado) != total_necessario:
         raise ValueError(
-            "O histórico final não corresponde ao último concurso."
+            f"Histórico incompleto: esperados {total_necessario}, "
+            f"obtidos {len(resultado)}."
         )
 
-    # Se não houve mudança, não regrava o arquivo.
-    anterior_normalizado = preparar_ultimos_100(anterior) if len(anterior) >= TOTAL_CONCURSOS else anterior
+    if len(resultado) > TOTAL_CONCURSOS:
+        resultado = resultado[-TOTAL_CONCURSOS:]
 
-    if (
-        len(anterior_normalizado) == len(combinado)
-        and anterior_normalizado.equals(combinado)
-    ):
-        return {
-            "status": "sem_novidades",
-            "total_concursos": len(combinado),
-            "primeiro_concurso": int(combinado["concurso"].min()),
-            "ultimo_concurso": numero_atual,
-            "novos_concursos": 0,
-            "arquivo": str(destino),
-        }
+    if len(resultado) != total_necessario:
+        raise ValueError("Quantidade final de concursos inválida.")
 
-    quantidade_novos = max(
-        0,
-        numero_atual - ultimo_local,
-    )
+    alterado = resultado != anterior
 
-    gravar_atomicamente(combinado, destino)
+    if alterado:
+        gravar_atomicamente(resultado)
+        print("CSV atualizado com sucesso.")
+    else:
+        print("Nenhuma alteração necessária. CSV preservado.")
 
     return {
-        "status": "atualizado",
-        "total_concursos": len(combinado),
-        "primeiro_concurso": int(combinado["concurso"].min()),
-        "ultimo_concurso": numero_atual,
-        "novos_concursos": quantidade_novos,
-        "arquivo": str(destino),
+        "arquivo": str(ARQUIVO_CSV),
+        "concurso_atual": numero_atual,
+        "primeiro_concurso": resultado[0]["concurso"],
+        "ultimo_concurso": resultado[-1]["concurso"],
+        "total_concursos": len(resultado),
+        "novos_concursos": novos_concursos,
+        "consultas_individuais": consultas,
+        "arquivo_alterado": alterado,
+        "status": "sucesso",
     }
 
 
@@ -463,14 +525,14 @@ if __name__ == "__main__":
     try:
         resultado = atualizar_historico()
 
-        print("\nATUALIZAÇÃO DO HISTÓRICO")
+        print("\nRESUMO DA ATUALIZAÇÃO")
         print("-" * 40)
 
         for chave, valor in resultado.items():
             print(f"{chave}: {valor}")
 
     except Exception as erro:
-        print("\nFALHA NA ATUALIZAÇÃO")
+        print("\nERRO NA ATUALIZAÇÃO")
         print(f"Motivo: {erro}")
         print("O CSV anterior foi preservado.")
         raise
