@@ -13,3 +13,12 @@ def exibir_analise_temperatura():
     return f"🔥 **Quentes (Mais sorteadas):** {txt_quentes}\n\n" \
            f"☀️ **Mornas (Frequência intermediária):** {txt_mornas}\n\n" \
            f"❄️ **Frias (Menos sorteadas):** {txt_frias}"
+def validar_soma_jogo(soma: float) -> str:
+    """Equivalente em Python da fórmula do Excel: =SE(E(G2>=166;G2<=224);'✅ DENTRO';'❌ FORA')"""
+    if soma == 0 or soma is None:
+        return ""
+    
+    if 166 <= soma <= 224:
+        return "✅ DENTRO (Padrão: 166 a 224)"
+    else:
+        return "❌ FORA (Padrão: 166 a 224)"
