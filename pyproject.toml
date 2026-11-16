@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "loterias-analise"
-version = "2.0.0"
-description = "Dashboard Lotofácil + Dia de Sorte: análise, geração e validação de jogos"
+version = "3.0.0"
+description = "Dashboard Lotofácil + Dia de Sorte + Mega-Sena: análise, geração e validação de jogos"
 requires-python = ">=3.11"
 dependencies = [
     "gradio>=5.0,<6.0",
