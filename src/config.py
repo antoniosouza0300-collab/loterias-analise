@@ -72,6 +72,17 @@ MEGA_SENA = LoteriaConfig(
     sorteios_semana="Ter, Qui, Sáb",
 )
 
+DUPLA_SENA = LoteriaConfig(
+    nome="Dupla Sena",
+    sigla="duplasena",
+    total_dezenas=6,
+    dezena_maxima=50,
+    endpoint="duplasena",
+    emoji="🎰",
+    cor="#0ea5e9",
+    sorteios_semana="Ter, Qui, Sáb",
+)
+
 LOTOMANIA = LoteriaConfig(
     nome="Lotomania",
     sigla="lotomania",
@@ -94,7 +105,7 @@ QUINA = LoteriaConfig(
     sorteios_semana="Seg–Sáb",
 )
 
-TODAS_LOTERIAS = [LOTOFACIL, DIA_DE_SORTE, MEGA_SENA, QUINA, LOTOMANIA]
+TODAS_LOTERIAS = [LOTOFACIL, DIA_DE_SORTE, MEGA_SENA, QUINA, LOTOMANIA, DUPLA_SENA]
 
 # ── Configurações globais ──────────────────────────────────
 

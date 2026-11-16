@@ -27,6 +27,9 @@ def _get_converter(lot: LoteriaConfig) -> Any:
     elif lot.sigla == "lotomania":
         from src.atualizador_lotomania import converter_resultado_api
         return converter_resultado_api
+    elif lot.sigla == "duplasena":
+        from src.atualizador_dupla import converter_resultado_api
+        return converter_resultado_api
     raise ValueError(f"Lotera desconhecida: {lot.sigla}")
 
 

@@ -16,6 +16,7 @@ from src.interface_mega import criar_aba_mega
 from src.interface_quina import criar_aba_quina
 from src.interface_analytics import criar_aba_analytics
 from src.interface_lotomania import criar_aba_lotomania
+from src.interface_dupla import criar_aba_dupla
 
 # ── Cache TTL (Lotofácil) ─────────────────────────────────────────────
 _cache: Dict[str, Any] = {"historico": None, "ts": 0.0}
@@ -412,6 +413,9 @@ def criar_interface():
 
             with gr.TabItem("🎲 Lotomania (20 de 100)"):
                 criar_aba_lotomania()
+
+            with gr.TabItem("🎰 Dupla Sena (6 de 50)"):
+                criar_aba_dupla()
 
             with gr.TabItem("📊 Analytics"):
                 criar_aba_analytics()
