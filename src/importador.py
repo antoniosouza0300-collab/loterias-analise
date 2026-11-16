@@ -1,121 +1,81 @@
 from pathlib import Path
-
+import numpy as np
 import pandas as pd
-
 
 COLUNAS_DEZENAS = [f"bola{i}" for i in range(1, 16)]
 COLUNAS_OBRIGATORIAS = ["concurso", *COLUNAS_DEZENAS]
 
 
 def validar_resultados(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Valida os resultados da Lotofácil.
-
-    Formato esperado:
-    concurso,data,bola1,...,bola15
-
-    A coluna data é opcional.
-    Retorna uma cópia validada e ordenada por concurso.
-    Levanta ValueError se encontrar problemas.
-    """
     if not isinstance(df, pd.DataFrame):
-        raise TypeError("A entrada precisa ser um DataFrame do pandas.")
+        raise TypeError("A entrada precisa ser um DataFrame.")
+    dados = df.copy().reset_index(drop=True)
+    if dados.empty:
+        raise ValueError("DataFrame vazio.")
 
-    dados = df.copy()
-    dados.columns = [str(col).strip().lower() for col in dados.columns]
+    dados.columns = [str(c).strip().lower() for c in dados.columns]
+    dup = dados.columns[dados.columns.duplicated()].tolist()
+    if dup:
+        raise ValueError(f"Colunas duplicadas: {', '.join(dup)}")
 
-    faltantes = [
-        coluna for coluna in COLUNAS_OBRIGATORIAS
-        if coluna not in dados.columns
-    ]
-
-    if faltantes:
-        raise ValueError(
-            "Colunas obrigatórias ausentes: " + ", ".join(faltantes)
-        )
+    falt = [c for c in COLUNAS_OBRIGATORIAS if c not in dados.columns]
+    if falt:
+        raise ValueError(f"Colunas ausentes: {', '.join(falt)}")
 
     problemas = []
 
-    # Converte concurso e dezenas para números inteiros.
-    colunas_numericas = ["concurso", *COLUNAS_DEZENAS]
-
-    for coluna in colunas_numericas:
-        valores = pd.to_numeric(dados[coluna], errors="coerce")
-
-        invalidos = valores.isna() | (valores % 1 != 0)
-
+    # Conversão vetorizada de concurso e dezenas
+    col_num = ["concurso", *COLUNAS_DEZENAS]
+    for c in col_num:
+        vals = pd.to_numeric(dados[c], errors="coerce")
+        invalidos = vals.isna() | (vals % 1 != 0)
         if invalidos.any():
             linhas = (dados.index[invalidos] + 2).tolist()
-            problemas.append(
-                f"Valores inválidos em '{coluna}', linhas: {linhas}"
-            )
+            problemas.append(f"Valores inválidos em '{c}', linhas: {linhas}")
         else:
-            dados[coluna] = valores.astype("int64")
+            dados[c] = vals.astype("int64")
 
     if problemas:
         raise ValueError("\n".join(problemas))
 
     if (dados["concurso"] <= 0).any():
-        problemas.append("Os números dos concursos devem ser positivos.")
-
+        problemas.append("Concursos devem ser positivos.")
     if dados["concurso"].duplicated().any():
-        duplicados = dados.loc[
-            dados["concurso"].duplicated(keep=False), "concurso"
-        ].tolist()
-        problemas.append(f"Concursos duplicados: {duplicados}")
+        dups = dados.loc[dados["concurso"].duplicated(keep=False), "concurso"].tolist()
+        problemas.append(f"Concursos duplicados: {dups}")
 
-    # Valida as 15 dezenas de cada concurso.
-    for indice, linha in dados.iterrows():
-        dezenas = [int(linha[coluna]) for coluna in COLUNAS_DEZENAS]
-        numero_linha = indice + 2
+    # Validação VETORIZADA de dezenas (elimina iterrows)
+    mat = dados[COLUNAS_DEZENAS].values  # shape (n, 15)
 
-        if any(numero < 1 or numero > 25 for numero in dezenas):
-            problemas.append(
-                f"Linha {numero_linha}: existem dezenas fora do intervalo 1–25."
-            )
+    fora = (mat < 1) | (mat > 25)
+    linhas_fora = (dados.index[fora.any(axis=1)] + 2).tolist()
+    if linhas_fora:
+        problemas.append(f"Dezenas fora de 1–25 nas linhas: {linhas_fora}")
 
-        if len(set(dezenas)) != 15:
-            problemas.append(
-                f"Linha {numero_linha}: existem dezenas repetidas."
-            )
+    # Duplicatas por linha via NumPy (rápido)
+    for idx in np.where(np.apply_along_axis(lambda r: len(set(r)) != 15, 1, mat))[0]:
+        problemas.append(f"Linha {idx + 2}: dezenas repetidas.")
 
-    # A data é opcional, mas precisa ser válida quando informada.
     if "data" in dados.columns:
         datas = pd.to_datetime(dados["data"], errors="coerce", dayfirst=True)
-
-        invalidas = datas.isna()
-        if invalidas.any():
-            linhas = (dados.index[invalidas] + 2).tolist()
-            problemas.append(f"Datas inválidas nas linhas: {linhas}")
+        inv = datas.isna()
+        if inv.any():
+            problemas.append(f"Datas inválidas: {(dados.index[inv] + 2).tolist()}")
         else:
             dados["data"] = datas.dt.strftime("%Y-%m-%d")
 
     if problemas:
-        raise ValueError(
-            "Foram encontrados problemas no CSV:\n- "
-            + "\n- ".join(problemas)
-        )
+        raise ValueError("Problemas no CSV:\n- " + "\n- ".join(problemas))
 
     return dados.sort_values("concurso").reset_index(drop=True)
 
 
 def importar_resultados(caminho: str | Path) -> pd.DataFrame:
-    """
-    Importa um CSV e retorna os resultados após a validação.
-    """
     arquivo = Path(caminho)
-
     if not arquivo.is_file():
         raise FileNotFoundError(f"Arquivo não encontrado: {arquivo}")
-
     try:
-        dados = pd.read_csv(
-            arquivo,
-            sep=None,
-            engine="python",
-            encoding="utf-8-sig",
-        )
-    except Exception as erro:
-        raise ValueError(f"Não foi possível ler o CSV: {erro}") from erro
-
+        dados = pd.read_csv(arquivo, sep=None, engine="python", encoding="utf-8-sig")
+    except Exception as e:
+        raise ValueError(f"Erro ao ler CSV: {e}") from e
     return validar_resultados(dados)
