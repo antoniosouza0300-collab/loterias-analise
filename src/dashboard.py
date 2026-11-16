@@ -24,6 +24,9 @@ def _get_converter(lot: LoteriaConfig) -> Any:
     elif lot.sigla == "quina":
         from src.atualizador_quina import converter_resultado_api
         return converter_resultado_api
+    elif lot.sigla == "lotomania":
+        from src.atualizador_lotomania import converter_resultado_api
+        return converter_resultado_api
     raise ValueError(f"Lotera desconhecida: {lot.sigla}")
 
 
@@ -96,6 +99,9 @@ def _get_avaliar_regras(lot: LoteriaConfig) -> Optional[Any]:
             return avaliar_regras
         elif lot.sigla == "quina":
             from src.regras_quina import avaliar_regras
+            return avaliar_regras
+        elif lot.sigla == "lotomania":
+            from src.regras_lotomania import avaliar_regras
             return avaliar_regras
     except ImportError:
         return None

@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, create_model, field_validator
 
-from src.config import LOTOFACIL, DIA_DE_SORTE, MEGA_SENA, QUINA, LoteriaConfig
+from src.config import LOTOFACIL, DIA_DE_SORTE, MEGA_SENA, QUINA, LOTOMANIA, LoteriaConfig
 
 
 def _criar_schema_concurso(lot: LoteriaConfig) -> type[BaseModel]:
@@ -33,12 +33,14 @@ ConcursoLotofacil = _criar_schema_concurso(LOTOFACIL)
 ConcursoDiaDeSorte = _criar_schema_concurso(DIA_DE_SORTE)
 ConcursoMegaSena = _criar_schema_concurso(MEGA_SENA)
 ConcursoQuina = _criar_schema_concurso(QUINA)
+ConcursoLotomania = _criar_schema_concurso(LOTOMANIA)
 
 SCHEMAS = {
     "lotofacil": ConcursoLotofacil,
     "diadesorte": ConcursoDiaDeSorte,
     "megasena": ConcursoMegaSena,
     "quina": ConcursoQuina,
+    "lotomania": ConcursoLotomania,
 }
 
 

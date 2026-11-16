@@ -39,10 +39,11 @@ class TestLoteriaConfig:
         assert LOTOFACIL.__dataclass_params__.frozen is True
 
     def test_todas_loterias(self):
-        assert len(TODAS_LOTERIAS) == 4
+        assert len(TODAS_LOTERIAS) == 5
         siglas = [l.sigla for l in TODAS_LOTERIAS]
         assert "lotofacil" in siglas
         assert "quina" in siglas
+        assert "lotomania" in siglas
 
     def test_total_concursos(self):
         assert TOTAL_CONCURSOS_HISTORICO == 100
