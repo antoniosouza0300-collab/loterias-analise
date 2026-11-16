@@ -1,175 +1,48 @@
-# Análise Estatística da Lotofácil
+# Análise Estatística de Loterias
 
-Projeto em Python para consultar, armazenar, validar e organizar os resultados históricos da Lotofácil, mantendo automaticamente os últimos 100 concursos da Caixa Econômica Federal.
+Projeto em Python para consultar, armazenar, validar e organizar os resultados históricos de loterias da Caixa Econômica Federal, com dashboard interativo em Gradio.
 
-## Objetivos
+## Loterias suportadas
 
-- Consultar os resultados da Lotofácil na API da CAIXA.
-- Manter um histórico local em formato CSV.
-- Armazenar somente os últimos 100 concursos.
-- Atualizar o histórico de forma incremental.
-- Evitar registros duplicados.
-- Validar os resultados recebidos e os dados armazenados.
-- Preservar o arquivo anterior em caso de falha durante a gravação.
+| Loteria | Dezenas | Sorteios | Arquivo CSV |
+|---------|---------|----------|-------------|
+| 🎱 Lotofácil (15 de 25) | 15 de 25 | Seg-Sáb | data/lotofacil.csv |
+| 🍀 Dia de Sorte (7 de 31) | 7 de 31 + mês | Ter, Qui, Sáb | data/diadesorte.csv |
+| 🍀 Mega-Sena (6 de 60) | 6 de 60 | Ter, Qui, Sáb | data/megasena.csv |
+| 🎯 Quina (5 de 80) | 5 de 80 | Seg-Sáb | data/quina.csv |
+| 🎲 Lotomania (20 de 100) | 20 de 100 | Seg-Sáb | data/lotomania.csv |
 
-## Requisitos
+## Funcionalidades
 
-- Python 3.10 ou superior.
-- Conexão com a internet para consultar a API da CAIXA.
-- Dependências declaradas em `requirements.txt`.
-
-## Estrutura do projeto
-
-```text
-loterias-analise/
-├── .gitignore
-├── README.md
-├── requirements.txt
-├── data/
-│   └── lotofacil.csv
-├── src/
-│   ├── atualizador.py
-│   ├── importador.py
-│   └── main.py
-└── tests/
-    └── test_atualizador.py
-```
-
-### Arquivos principais
-
-| Arquivo | Responsabilidade |
-|---|---|
-| `src/main.py` | Ponto de entrada e inicialização do programa |
-| `src/atualizador.py` | Consulta a API, valida e atualiza o histórico |
-| `src/importador.py` | Importação e validação de resultados em CSV |
-| `data/lotofacil.csv` | Histórico local dos concursos |
-| `requirements.txt` | Lista de dependências do projeto |
+- Dashboard interativo com 6 abas (5 loterias + Analytics)
+- Atualização automática via API CAIXA
+- Gráficos interativos Plotly
+- Score de aderência 0-100
+- Tendências temporais
+- SQLite + Cache + Retry com backoff
+- Validação Pydantic
+- CI/CD com GitHub Actions
+- 169 testes automatizados
 
 ## Instalação
 
-Clone o repositório e acesse a pasta do projeto.
-
-Crie um ambiente virtual:
-
-```bash
-python -m venv .venv
-```
-
-Ative o ambiente virtual.
-
-**Linux / macOS:**
-
-```bash
-source .venv/bin/activate
-```
-
-**Windows PowerShell:**
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Instale as dependências:
-
-```bash
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+    git clone https://github.com/antoniosouza0300-collab/loterias-analise.git
+    cd loterias-analise
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
 
 ## Execução
 
-### Inicialização principal
-
-Execute na raiz do projeto:
-
-```bash
-python -m src.main
-```
-
-O programa inicia a rotina de atualização do histórico antes de concluir a inicialização.
-
-## Atualização automática do histórico
-
-Ao executar `python -m src.main`, o programa consulta a API oficial da CAIXA e atualiza o arquivo local.
-
-O atualizador foi implementado para:
-
-- Manter somente os últimos 100 concursos.
-- Identificar concursos ausentes no histórico.
-- Consultar o concurso mais recente para verificar atualizações.
-- Inserir novos resultados sem duplicar registros.
-- Evitar gravações quando não existem alterações.
-- Preservar a continuidade da sequência de concursos.
-
-A atualização depende de conexão com a internet e da disponibilidade da API da CAIXA.
-
-## Validações implementadas
-
-O atualizador verifica:
-
-- Existência dos campos esperados no registro.
-- Identificação válida do concurso.
-- Presença de 15 dezenas por resultado.
-- Dezenas inteiras entre 1 e 25.
-- Ausência de dezenas repetidas no mesmo concurso.
-- Ausência de concursos duplicados.
-- Continuidade da sequência histórica.
-- Organização dos registros por número de concurso.
-
-## Segurança e integridade dos dados
-
-A gravação do histórico utiliza um arquivo temporário e substituição atômica com `os.replace`.
-
-Esse procedimento reduz o risco de deixar o CSV parcialmente gravado caso ocorra uma falha durante a atualização.
-
-Quando não há alterações, o arquivo existente é preservado sem regravação.
-
-## Formato do histórico
-
-O arquivo `data/lotofacil.csv` utiliza as seguintes colunas:
-
-```text
-concurso,data,bola1,bola2,bola3,bola4,bola5,bola6,bola7,bola8,bola9,bola10,bola11,bola12,bola13,bola14,bola15
-```
-
-Cada linha representa um concurso e suas 15 dezenas sorteadas.
-
-## Critérios estatísticos planejados
-
-Os critérios abaixo fazem parte do planejamento de evolução do projeto. Não devem ser considerados funcionalidades implementadas nesta versão:
-
-- Frequência histórica e classificação de dezenas.
-- Soma das dezenas.
-- Quantidade de pares e ímpares.
-- Números primos.
-- Moldura e miolo.
-- Repetições e ausências em relação ao concurso anterior.
-- Múltiplos de 3.
-- Sequência de Fibonacci.
-- Linhas, colunas e quadrantes.
-- Diagonais, cruz e extremos.
-- Filtros configuráveis para avaliação de combinações.
-- Geração de relatórios estatísticos.
-
-As definições matemáticas desses critérios deverão ser especificadas e validadas antes da implementação.
+    python -m src.interface
 
 ## Testes
 
-O projeto utiliza pytest para executar testes automatizados.
-
-A suíte está localizada em tests/test_atualizador.py e cobre validações de dados, conversão de resultados, gravação atômica, atualização incremental, idempotência e tratamento de erros.
-
-Para executar os testes na raiz do projeto:
-
-    python -m pytest tests/ -v
-
-Os testes utilizam dados temporários e simulações de respostas da API, sem modificar o histórico real ou consultar a CAIXA.
+    pytest tests/ -v
 
 ## Limitações estatísticas
 
-As frequências e os padrões históricos descrevem resultados anteriores. Em um sorteio justo, cada combinação válida de 15 dezenas possui a mesma probabilidade matemática de ser sorteada.
-
-Portanto, análises históricas e filtros podem organizar ou selecionar combinações segundo critérios definidos, mas não predizem o próximo resultado nem aumentam a probabilidade matemática de uma combinação específica.
+Análises históricas não predizem resultados futuros. Cada combinação válida tem a mesma probabilidade matemática.
 
 ## Licença
 
