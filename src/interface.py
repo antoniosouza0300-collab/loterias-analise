@@ -14,6 +14,7 @@ from src.analise import gerar_html_analise
 from src.interface_dia import criar_aba_dia
 from src.interface_mega import criar_aba_mega
 from src.interface_quina import criar_aba_quina
+from src.interface_analytics import criar_aba_analytics
 
 # ── Cache TTL (Lotofácil) ─────────────────────────────────────────────
 _cache: Dict[str, Any] = {"historico": None, "ts": 0.0}
@@ -407,6 +408,9 @@ def criar_interface():
 
             with gr.TabItem("🎯 Quina (5 de 80)"):
                 criar_aba_quina()
+
+            with gr.TabItem("📊 Analytics"):
+                criar_aba_analytics()
 
     return demo
 
