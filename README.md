@@ -10,7 +10,7 @@ Projeto em Python para consultar, armazenar, validar e organizar os resultados h
 | 🍀 Dia de Sorte (7 de 31) | 7 de 31 + mês | Ter, Qui, Sáb | data/diadesorte.csv |
 | 🍀 Mega-Sena (6 de 60) | 6 de 60 | Ter, Qui, Sáb | data/megasena.csv |
 | 🎯 Quina (5 de 80) | 5 de 80 | Seg-Sáb | data/quina.csv |
-| 🎲 Lotomania (20 de 100) | 20 de 100 | Seg-Sáb | data/lotomania.csv |
+| 🎲 Lotomania, Dupla Sena (20 de 100) | 20 de 100 | Seg-Sáb | data/lotomania.csv |
 
 ## Funcionalidades
 
